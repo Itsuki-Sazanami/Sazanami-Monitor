@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JR東日本運行情報 常時監視ダッシュボード</title>
+    <!-- Tailwind CSSを読み込み (デザインをシンプルに) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* カスタムスタイル */
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            background-color: #ffffff; 
+        }
+        .monitor-card {
+            background-color: #ffffff;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06); 
+            border-left: 5px solid #d1d5db; /* デフォルトの左枠線 */
+            transition: all 0.15s ease-in-out;
+        }
+        /* 運行情報アイテムの共通スタイル */
+        .info-item {
+             border-left: 4px solid;
+             background-color: #ffffff;
+             padding: 12px;
+             border-radius: 6px;
+             box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        }
+        /* 路線名やステータスの強調をなくす */
+        .railway-name, .status-text {
+            font-weight: 500; 
+            color: #1f2937; 
+            margin-right: 4px; 
+            padding: 0;
+            white-space: nowrap; 
+            font-size: 1em; 
+        }
+        /* 詳細情報テキストのスタイル */
+        .detail-text {
+            color: #4b5563; 
+            font-size: 0.95em;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-4xl mx-auto">
+        <header class="mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">JR東日本運行情報 常時監視ダッシュボード</h1>
+            <p class="text-gray-500">運行に影響する情報と定型的なお知らせのみを表示。平常運転の路線は非表示にしています。</p>
+        </header>
+
+        <!-- ステータスパネル -->
+        <div id="status-panel" class="monitor-card rounded-lg p-4 mb-6 transition duration-300 border-l-4 border-gray-400">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center">
+                    <svg id="status-icon" class="w-6 h-6 mr-3 text-gray-500 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0l3-3m-3 3l3 3"></path></svg>
+                    <span id="status-text" class="text-lg font-semibold text-gray-700">初期化中...</span>
+                </div>
+                <span id="last-updated" class="text-sm text-gray-500">最終更新: -</span>
+            </div>
+            <p id="next-update-info" class="text-xs mt-1 text-gray-400">次回更新まで: -</p>
+        </div>
+
+        <!-- 運行情報表示エリア (運休・見合わせ・遅延・乱れ - 定型文除く) -->
+        <div id="info-display" class="space-y-4 mb-8">
+            <h2 class="text-xl font-semibold text-gray-700 mb-2">🚨 運行情報（運行影響あり）</h2>
+            <div id="realtime-results" class="space-y-2 p-4 border rounded-lg bg-gray-50 border-gray-200">
+                <p class="text-gray-500">データ取得を待っています...</p>
+            </div>
+        </div>
+        
+        <!-- お知らせ表示エリア (定型文、保守工事、外部リンク情報のみ) -->
+        <div id="notice-display" class="space-y-4">
+            <h2 class="text-xl font-semibold text-gray-700 mb-2">📢 お知らせ（定型文・工事情報など）</h2>
+            <div id="notice-results" class="space-y-2 p-4 border rounded-lg bg-gray-50 border-gray-200">
+                <p class="text-gray-500">現在、特筆すべきお知らせはありません。</p>
+            </div>
+        </div>
+
+        <!-- 監視設定（テスト用） -->
+        <div class="mt-8 p-4 bg-gray-100 rounded-lg">
+            <h3 class="text-lg font-semibold text-gray-700 mb-2">監視設定</h3>
+            <div class="flex items-center space-x-4">
+                <label for="interval-select" class="text-sm text-gray-600">更新間隔:</label>
+                <select id="interval-select" class="p-2 border rounded-md">
+                    <option value="15000">15秒</option>
+                    <option value="30000" selected>30秒</option>
+                    <option value="60000">60秒 (1分)</option>
+                    <option value="120000">120秒 (2分)</option>
+                </select>
+                <button id="toggle-monitor" class="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition duration-150">監視停止</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =================================================================
+        // 🔑 設定情報 (チャレンジAPIと認証キーを設定)
+        // =================================================================
+        const CONSUMER_KEY = "mkgexd43rtmsoiw9mlp4ezgwfc1p0ekyh0ltya28ta5bc3aaus95d1tbomcgtdyp"; 
+
+        // JR東日本アイステイションズの運行情報APIエンドポイント (チャレンジAPI)
+        const TRAIN_INFO_API_URL = "https://api-challenge.odpt.org/api/v4/odpt:TrainInformation?odpt:operator=odpt.Operator:jre-is";
+        
+        // =================================================================
+        // 🗺️ 路線名マッピング (APIのID → 日本語名)
+        // =================================================================
+        const RAILWAY_NAME_MAP = {
+            "JR-East.Tokaido": "東海道線", "JR-East.Yokosuka": "横須賀線", "JR-East.ShonanShinjuku": "湘南新宿ライン",
+            "JR-East.KeihinTohokuNegishi": "京浜東北・根岸線", "JR-East.Yokohama": "横浜線", "JR-East.Nambu": "南武線",
+            "JR-East.NambuBranch": "南武線浜川崎支線", "JR-East.Yamanote": "山手線", "JR-East.Chuo": "中央本線",
+            "JR-East.ChuoRapid": "中央線快速電車", "JR-East.ChuoSobuLocal": "中央・総武線各駅停車", "JR-East.SobuRapid": "総武快速線",
+            "JR-East.Ome": "青梅線", "JR-East.Itsukaichi": "五日市線", "JR-East.Utsunomiya": "宇都宮線", "JR-East.Takasaki": "高崎線",
+            "JR-East.SaikyoKawagoe": "埼京線・川越線", "JR-East.Kawagoe": "川越線", "JR-East.SotetsuDirect": "相鉄線直通列車",
+            "JR-East.Joban": "常磐線", "JR-East.JobanRapid": "常磐線快速電車", "JR-East.JobanLocal": "常磐線各駅停車",
+            "JR-East.Keiyo": "京葉線", "JR-East.Musashino": "武蔵野線", "JR-East.Sagami": "相模線", "JR-East.Uchibo": "内房線",
+            "JR-East.Sotobo": "外房線", "JR-East.Sobu": "総武本線", "JR-East.Nikko": "日光線", "JR-East.Karasuyama": "烏山線",
+            "JR-East.Tsurumi": "鶴見線", "JR-East.TsurumiUmiShibauraBranch": "鶴見線海芝浦支線", "JR-East.TsurumiOkawaBranch": "鶴見線大川支線",
+            "JR-East.Ito": "伊東線", "JR-East.Hachiko": "八高線", "JR-East.Mito": "水戸線", "JR-East.Suigun": "水郡線",
+            "JR-East.SuigunBranch": "水郡線常陸太田支線", "JR-East.Narita": "成田線", "JR-East.NaritaAirportBranch": "成田線空港支線",
+            "JR-East.NaritaAbikoBranch": "成田線我孫子支線", "JR-East.Kashima": "鹿島線", "JR-East.Togane": "東金線",
+            "JR-East.Kururi": "久留里線", "JR-East.ChuoTatsunoBranch": "中央本線辰野支線", "JR-East.TohokuShinkansen": "東北新幹線",
+            "JR-East.JoetsuShinkansen": "上越新幹線", "JR-East.HokurikuShinkansen": "北陸新幹線", "JR-East.YamagataShinkansen": "山形新幹線",
+            "JR-East.AkitaShinkansen": "秋田新幹線", "JR-East.BanetsuWest": "磐越西線", "JR-East.Ou": "奥羽本線",
+            "JR-East.Hachinohe": "八戸線", "JR-East.Yamada": "山田線", "JR-East.Hanawa": "花輪線", "JR-East.Tsugaru": "津軽線",
+            "JR-East.Oga": "男鹿線", "JR-East.Aterazawa": "左沢線", "JR-East.Kesennuma": "気仙沼線", "JR-East.Ishinomaki": "石巻線",
+            "JR-East.RikuEast": "陸羽東線", "JR-East.Uetsu": "羽越本線", "JR-East.RikuWest": "陸羽西線", "JR-East.Echigo": "越後線",
+            "JR-East.Tohoku": "東北本線", "JR-East.BanetsuEast": "磐越東線", "JR-East.OuYamagata": "奥羽本線山形エリア",
+            "JR-East.Senseki": "仙石線", "JR-East.Senzan": "仙山線", "JR-East.Ofunato": "大船渡線", "JR-East.Kitakami": "北上線",
+            "JR-East.Kamaishi": "釜石線", "JR-East.Ominato": "大湊線", "JR-East.Tazawako": "田沢湖線", "JR-East.Gono": "五能線",
+            "JR-East.Tadami": "只見線", "JR-East.SensekiTohoku": "仙石東北ライン", "JR-East.Hakushin": "白新線",
+            "JR-East.Yahiko": "弥彦線", "JR-East.Shinonoi": "篠ノ井線", "JR-East.Oito": "大糸線", "JR-East.Shinetsu": "信越本線",
+            "JR-East.Agatsuma": "吾妻線", "JR-East.Ryomo": "両毛線", "JR-East.Joetsu": "上越線", "JR-East.Koumi": "小海線",
+            "JR-East.Iiyama": "飯山線", "JR-East.Yonesaka": "米坂線",
+        };
+        
+        // ❌ 通知除外路線 設定リスト (日本語名)
+        const EXCLUDED_RAILWAYS_JA = [
+        "久留里線","磐越西線","奥羽本線","八戸線","山田線",
+        "花輪線","津軽線","大湊線","男鹿線","左沢線","気仙沼線",
+        "石巻線","陸羽東線","羽越本線","陸羽西線","越後線",
+        "東北本線","磐越東線","奥羽本線山形エリア","仙石線","仙山線",
+        "大船渡線","北上線","釜石線","田沢湖線","五能線","只見線",
+        "仙石東北ライン","白新線","弥彦線","篠ノ井線","大糸線","信越本線",
+        "吾妻線","両毛線","上越線","小海線","飯山線","米坂線"
+        ];
+        
+        // =================================================================
+        // 🛠️ ユーティリティ関数
+        // =================================================================
+
+        /**
+         * APIの路線ID（odpt:Railway:JR-East.XXX）を日本語名に変換します。
+         */
+        function getJapaneseRailwayName(railwayId) {
+            const fullIdKey = railwayId.replace('odpt.Railway:', ''); 
+            const cleanIdKey = fullIdKey.replace('JR-East.', '');
+            
+            return RAILWAY_NAME_MAP[fullIdKey] || RAILWAY_NAME_MAP[cleanIdKey] || cleanIdKey || '不明な路線';
+        }
+
+        /**
+         * 運行情報メッセージを抽出・整形し、デザインをシンプルに表示します。
+         * @param {boolean} isAlert - 運行情報欄に表示される（運行に影響がある）かどうか
+         * @returns {string} 整形されたメッセージHTML
+         */
+        function formatTrainInfoMessage(railwayNameJa, infoTextJa, statusTextJa, isAlert) {
+            
+            // 1. 運行状況ステータスの確定
+            let displayStatus = statusTextJa || (isAlert ? "運行情報" : "情報あり");
+            
+            // 2. 運行状況の判定とアイコン・色の設定
+            let icon = 'ℹ️';
+            let borderColorClass = 'border-gray-300'; 
+            let iconColorClass = 'text-gray-500'; 
+            
+            // 詳細テキストに含まれる重要なキーワード
+            const isCriticalText = infoTextJa.includes('運転見合わせ') || infoTextJa.includes('運休');
+            const isDelayText = infoTextJa.includes('遅れ') || infoTextJa.includes('遅延') || infoTextJa.includes('乱れ');
+
+            if (isAlert) {
+                // 運行情報（アラート）として表示する場合
+                if (isCriticalText) {
+                    icon = '🚨'; 
+                    borderColorClass = 'border-red-600';
+                    iconColorClass = 'text-red-700';
+                    displayStatus = displayStatus.includes('運休') ? '運休' : '運転見合わせ';
+                } else if (isDelayText) {
+                    icon = '⚠️'; 
+                    borderColorClass = 'border-yellow-400';
+                    iconColorClass = 'text-yellow-600';
+                    displayStatus = displayStatus.includes('遅延') ? '遅延' : '乱れ';
+                } else {
+                     // isAlert=trueだがテキストから状態が読み取れない場合（基本は発生しないが赤に設定）
+                    icon = '🔥';
+                    borderColorClass = 'border-red-500';
+                    iconColorClass = 'text-red-600';
+                    displayStatus = statusTextJa || '運行情報';
+                }
+
+            } else {
+                 // お知らせ欄に表示する場合 (isAlertがfalse: 定型文など)
+                if (infoTextJa.includes('保守工事')) {
+                    icon = '🚧';
+                    borderColorClass = 'border-purple-300';
+                    iconColorClass = 'text-purple-600';
+                    displayStatus = '工事情報';
+                } else {
+                    // その他の情報（定型文、外部リンクなど）は青
+                    icon = '📢';
+                    borderColorClass = 'border-blue-300';
+                    iconColorClass = 'text-blue-500';
+                    displayStatus = statusTextJa || 'お知らせ';
+                }
+            }
+
+            // 3. HTMLメッセージの組み立て
+            const messageHtml = `
+                <div class="info-item ${borderColorClass} flex items-start text-sm">
+                    <span class="mr-2 text-xl flex-shrink-0 ${iconColorClass}">${icon}</span>
+                    <div class="flex-grow text-gray-800">
+                        <span class="railway-name">${railwayNameJa}</span> 
+                        <span class="status-text text-gray-500">(${displayStatus})</span> 
+                        <span class="detail-text block mt-0.5">${infoTextJa}</span>
+                    </div>
+                </div>
+            `;
+            
+            return messageHtml;
+        }
+
+        // =================================================================
+        // 📡 APIデータ取得と処理
+        // =================================================================
+
+        let monitorIntervalId = null; 
+        let isMonitoring = true;      
+        let updateIntervalMs = 30000; 
+        let lastUpdateTime = null;    
+
+        /**
+         * ODPTの列車運行情報APIから最新データを取得し、表示を更新します。
+         */
+        async function fetchAndUpdateTrainInfo() {
+            if (!isMonitoring) {
+                console.log("監視が停止しています。");
+                return;
+            }
+
+            // UIステータスを更新（取得中）
+            updateStatusUI("取得中...", "blue", true);
+            
+            const apiUrlWithKey = `${TRAIN_INFO_API_URL}&acl:consumerKey=${CONSUMER_KEY}`;
+            const resultsDiv = document.getElementById('realtime-results');
+            const noticeDiv = document.getElementById('notice-results');
+            
+            try {
+                const response = await fetchWithRetry(apiUrlWithKey);
+                
+                if (!response.ok) {
+                    throw new Error(`APIリクエスト失敗: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                let activeAlertsHtml = [];   // 運行情報（運行影響あり）用
+                let activeNoticesHtml = [];  // お知らせ（定型文など）用
+                
+                // 運行情報データを分類
+                for (const item of data) {
+                    const railwayId = item['odpt:railway'] || null;
+                    const infoTextJa = item['odpt:trainInformationText'] ? item['odpt:trainInformationText']['ja'] : null;
+                    const statusTextJa = item['odpt:trainInformationStatus'] ? item['odpt:trainInformationStatus']['ja'] : null;
+
+                    // 日本語名の確定
+                    let railwayNameJa = item['odpt:railwayTitle'] ? item['odpt:railwayTitle']['ja'] : null;
+                    
+                    if (!railwayNameJa && railwayId) {
+                        railwayNameJa = getJapaneseRailwayName(railwayId);
+                    } else if (!railwayNameJa) {
+                        railwayNameJa = '不明な路線';
+                    }
+
+                    // 除外リストにある路線は無視
+                    if (EXCLUDED_RAILWAYS_JA.includes(railwayNameJa) || !infoTextJa) {
+                        continue;
+                    }
+
+                    // --- 運行情報と「お知らせ」の分類ロジック (平常運転除外) ---
+                    
+                    // 平常運転の情報はリストに表示しない
+                    if (infoTextJa.includes('平常運転')) {
+                        continue; 
+                    }
+                    
+                    // お知らせ欄に分類するキーワード (保守工事、外部リンク情報など)
+                    const isNoticeKeyword = 
+                        infoTextJa.includes('保守工事') || 
+                        infoTextJa.includes('詳しくはＪＲ東日本のホームページ') || 
+                        infoTextJa.includes('お知らせ欄からご覧いただけます');
+
+                    // 1. お知らせ欄に分類する場合 (定型文や工事情報など)
+                    if (isNoticeKeyword) {
+                        const formattedMessageHtml = formatTrainInfoMessage(railwayNameJa, infoTextJa, statusTextJa, false);
+                        activeNoticesHtml.push(formattedMessageHtml);
+                    }
+                    
+                    // 2. 運行情報（アラート）として分類する場合 (上記以外、運行に影響がある情報)
+                    else {
+                        const formattedMessageHtml = formatTrainInfoMessage(railwayNameJa, infoTextJa, statusTextJa, true);
+                        activeAlertsHtml.push(formattedMessageHtml);
+                    }
+                }
+
+                // UI更新
+                lastUpdateTime = new Date();
+                document.getElementById('last-updated').textContent = `最終更新: ${lastUpdateTime.toLocaleTimeString('ja-JP')}`;
+                
+                // 運行情報欄の更新 (運行に影響がある情報のみ)
+                if (activeAlertsHtml.length > 0) {
+                    // 情報があればソート（路線名順）
+                    activeAlertsHtml.sort(); 
+                    resultsDiv.innerHTML = activeAlertsHtml.join('');
+                    resultsDiv.classList.remove('bg-gray-50', 'border-gray-200');
+                    
+                    // 重大なアラート（運休・見合わせ）があるかチェック
+                    const hasCriticalAlert = activeAlertsHtml.some(html => html.includes('border-red-600'));
+                    
+                    if (hasCriticalAlert) {
+                        resultsDiv.classList.add('bg-white', 'border-red-500'); 
+                        updateStatusUI("運休・見合わせ情報あり", "red", false);
+                    } else {
+                        // 遅延・乱れのみの場合
+                        resultsDiv.classList.add('bg-white', 'border-yellow-400');
+                        updateStatusUI("遅延・乱れ情報あり", "orange", false);
+                    }
+                    
+                } else {
+                    // アラート情報がない場合
+                    resultsDiv.innerHTML = `<div class="p-3 text-green-700">現在、運行に大きな支障をきたす情報はありません。（通常監視）</div>`;
+                    resultsDiv.classList.remove('bg-white', 'border-red-500', 'border-yellow-400');
+                    resultsDiv.classList.add('bg-gray-50', 'border-gray-200');
+                    updateStatusUI("平常運転", "green", false); 
+                }
+
+                // お知らせ欄の更新 (定型文、工事情報など)
+                if (activeNoticesHtml.length > 0) {
+                    // 通知を路線名でソート（A-Z順）
+                    activeNoticesHtml.sort(); 
+                    noticeDiv.innerHTML = activeNoticesHtml.join('');
+                    noticeDiv.classList.remove('bg-gray-50', 'border-gray-200');
+                    noticeDiv.classList.add('bg-white', 'border-blue-300'); 
+                } else {
+                    noticeDiv.innerHTML = `<div class="p-3 text-gray-500">現在、定型的なお知らせはありません。</div>`;
+                    noticeDiv.classList.remove('bg-white', 'border-blue-300');
+                    noticeDiv.classList.add('bg-gray-50', 'border-gray-200');
+                }
+                
+
+            } catch (error) {
+                console.error("データ取得または処理中にエラーが発生しました:", error);
+                resultsDiv.innerHTML = `<div class="p-3 text-yellow-700">エラーが発生しました。APIキーまたはネットワーク接続を確認してください。 (${error.message})</div>`;
+                noticeDiv.innerHTML = `<div class="p-3 text-yellow-700">お知らせ情報の取得中にエラーが発生しました。</div>`;
+                updateStatusUI("エラー", "orange", false);
+            }
+        }
+        
+        /**
+         * 指数バックオフ付きのフェッチ関数
+         */
+        async function fetchWithRetry(url, maxRetries = 3) {
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(url);
+                    if (response.status !== 429) { 
+                        return response;
+                    }
+                    if (i === maxRetries - 1) {
+                        return response; 
+                    }
+                    const delay = Math.pow(2, i) * 1000 + Math.random() * 1000; 
+                    console.log(`[API] 429を検出。${delay / 1000}秒待機してからリトライします...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } catch (error) {
+                    if (i === maxRetries - 1) {
+                        throw error;
+                    }
+                    console.warn(`[API] ネットワークエラーを検出。リトライ中...`, error.message);
+                    const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+
+
+        /**
+         * UIのステータス表示を更新します。
+         */
+        function updateStatusUI(text, color, isSpin) {
+            const panel = document.getElementById('status-panel');
+            const icon = document.getElementById('status-icon');
+            const statusText = document.getElementById('status-text');
+
+            statusText.textContent = text;
+            
+            // 色の更新
+            panel.className = 'monitor-card rounded-lg p-4 mb-6 transition duration-300 border-l-4'; // リセット
+            let borderColor = 'border-gray-400';
+            let iconColor = 'text-gray-500';
+            
+            switch (color) {
+                case 'red':
+                    borderColor = 'border-red-500';
+                    iconColor = 'text-red-500';
+                    break;
+                case 'green':
+                    borderColor = 'border-green-500';
+                    iconColor = 'text-green-500';
+                    break;
+                case 'orange': 
+                    borderColor = 'border-yellow-500';
+                    iconColor = 'text-yellow-500';
+                    break;
+                case 'blue': 
+                    borderColor = 'border-blue-500';
+                    iconColor = 'text-blue-500';
+                    break;
+                case 'gray':
+                default:
+                    borderColor = 'border-gray-400';
+                    iconColor = 'text-gray-500';
+                    break;
+            }
+            
+            panel.classList.add(borderColor);
+            icon.classList.remove('text-gray-500', 'text-red-500', 'text-green-500', 'text-yellow-500', 'text-blue-500');
+            icon.classList.add(iconColor);
+
+            // アイコンアニメーション
+            if (isSpin) {
+                icon.classList.add('animate-spin');
+                icon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0l3-3m-3 3l3 3"></path>`;
+            } else {
+                icon.classList.remove('animate-spin');
+                // 完了アイコンに変更
+                icon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>`;
+            }
+        }
+
+        /**
+         * 次回更新までの残り時間をカウントダウン表示します。
+         */
+        function updateCountdown() {
+            const nextUpdateInfo = document.getElementById('next-update-info');
+            if (isMonitoring) {
+                // lastUpdateTimeがnullでないことを確認し、nullの場合は現在の時刻を基準にする
+                const baseTime = lastUpdateTime ? lastUpdateTime.getTime() : new Date().getTime() - updateIntervalMs;
+                const nextUpdateTimestamp = baseTime + updateIntervalMs;
+                const remainingTimeMs = nextUpdateTimestamp - new Date().getTime();
+                
+                if (remainingTimeMs > 0) {
+                    const remainingSeconds = Math.ceil(remainingTimeMs / 1000);
+                    nextUpdateInfo.textContent = `次回更新まで: 約 ${remainingSeconds} 秒`;
+                } else {
+                     nextUpdateInfo.textContent = `次回更新まで: 処理中...`;
+                }
+            } else {
+                nextUpdateInfo.textContent = '監視は停止しています。';
+            }
+        }
+
+        // =================================================================
+        // 🔄 監視機能の制御
+        // =================================================================
+        
+        /**
+         * 監視を開始します。
+         */
+        function startMonitoring() {
+            if (monitorIntervalId !== null) {
+                clearInterval(monitorIntervalId);
+            }
+            isMonitoring = true;
+            document.getElementById('toggle-monitor').textContent = '監視停止';
+            document.getElementById('toggle-monitor').classList.remove('bg-green-500', 'hover:bg-green-600');
+            document.getElementById('toggle-monitor').classList.add('bg-red-500', 'hover:bg-red-600');
+
+            // 初回実行
+            fetchAndUpdateTrainInfo(); 
+            // 定期実行
+            monitorIntervalId = setInterval(fetchAndUpdateTrainInfo, updateIntervalMs);
+            // カウントダウン表示の開始 (1秒ごと)
+            setInterval(updateCountdown, 1000); 
+            
+            console.log(`監視を開始しました。更新間隔: ${updateIntervalMs / 1000} 秒`);
+        }
+
+        /**
+         * 監視を停止します。
+         */
+        function stopMonitoring() {
+            if (monitorIntervalId !== null) {
+                clearInterval(monitorIntervalId);
+                monitorIntervalId = null;
+            }
+            isMonitoring = false;
+            document.getElementById('toggle-monitor').textContent = '監視再開';
+            document.getElementById('toggle-monitor').classList.remove('bg-red-500', 'hover:bg-red-600');
+            document.getElementById('toggle-monitor').classList.add('bg-green-500', 'hover:bg-green-600');
+            document.getElementById('status-text').textContent = '監視停止中';
+            updateStatusUI("監視停止中", "gray", false);
+            console.log("監視を停止しました。");
+        }
+
+        // =================================================================
+        // 🚀 初期設定とイベントリスナー
+        // =================================================================
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const intervalSelect = document.getElementById('interval-select');
+            const toggleButton = document.getElementById('toggle-monitor');
+            
+            // 1. 更新間隔の変更
+            intervalSelect.addEventListener('change', (e) => {
+                updateIntervalMs = parseInt(e.target.value);
+                if (isMonitoring) {
+                    stopMonitoring();
+                    startMonitoring();
+                }
+                console.log(`更新間隔を ${updateIntervalMs / 1000} 秒に変更しました。`);
+            });
+
+            // 2. 監視/停止の切り替え
+            toggleButton.addEventListener('click', () => {
+                if (isMonitoring) {
+                    stopMonitoring();
+                } else {
+                    startMonitoring();
+                }
+            });
+
+            // 3. 初期監視開始
+            updateIntervalMs = parseInt(intervalSelect.value);
+            // lastUpdateTimeを初期化 (初回実行からカウントダウンが始まるように)
+            lastUpdateTime = new Date(new Date().getTime() - updateIntervalMs); 
+            startMonitoring();
+        });
+    </script>
+</body>
+</html>
