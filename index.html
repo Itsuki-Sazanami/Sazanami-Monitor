@@ -48,6 +48,7 @@
         <header class="mb-6">
             <h1 class="text-3xl font-bold text-gray-800">JR東日本運行情報 常時監視ダッシュボード</h1>
             <p class="text-gray-500">運行に影響する情報と定型的なお知らせのみを表示。平常運転の路線は非表示にしています。</p>
+            <p class="text-gray-500">⚠非公式情報のため、正確な運行情報はJR東日本アプリ等を参照してください。</p>
         </header>
 
         <!-- ステータスパネル -->
@@ -64,7 +65,7 @@
 
         <!-- 運行情報表示エリア (運休・見合わせ・遅延・乱れ - 定型文除く) -->
         <div id="info-display" class="space-y-4 mb-8">
-            <h2 class="text-xl font-semibold text-gray-700 mb-2">🚨 運行情報（運行影響あり）</h2>
+            <h2 class="text-xl font-semibold text-gray-700 mb-2">🚨 運行情報</h2>
             <div id="realtime-results" class="space-y-2 p-4 border rounded-lg bg-gray-50 border-gray-200">
                 <p class="text-gray-500">データ取得を待っています...</p>
             </div>
@@ -72,7 +73,7 @@
         
         <!-- お知らせ表示エリア (定型文、保守工事、外部リンク情報のみ) -->
         <div id="notice-display" class="space-y-4">
-            <h2 class="text-xl font-semibold text-gray-700 mb-2">📢 お知らせ（定型文・工事情報など）</h2>
+            <h2 class="text-xl font-semibold text-gray-700 mb-2">📢 お知らせ（工事情報など）</h2>
             <div id="notice-results" class="space-y-2 p-4 border rounded-lg bg-gray-50 border-gray-200">
                 <p class="text-gray-500">現在、特筆すべきお知らせはありません。</p>
             </div>
@@ -549,3 +550,4 @@
     </script>
 </body>
 </html>
+
