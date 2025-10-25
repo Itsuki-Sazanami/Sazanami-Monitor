@@ -48,7 +48,7 @@
         <header class="mb-6">
             <h1 class="text-3xl font-bold text-gray-800">JR東日本運行情報 常時監視ダッシュボード</h1>
             <p class="text-gray-500">運行に影響する情報と定型的なお知らせのみを表示。平常運転の路線は非表示にしています。</p>
-            <p class="text-gray-500">⚠非公式情報のため、正確な運行情報はJR東日本アプリ等を参照してください。</p>
+            <p class="text-gray-500">⚠️非公式情報のため、正確な運行情報はJR東日本アプリ等を参照してください。</p>
         </header>
 
         <!-- ステータスパネル -->
@@ -85,8 +85,8 @@
             <div class="flex items-center space-x-4">
                 <label for="interval-select" class="text-sm text-gray-600">更新間隔:</label>
                 <select id="interval-select" class="p-2 border rounded-md">
-                    <option value="15000">15秒</option>
-                    <option value="30000" selected>30秒</option>
+                    <option value="15000" selected>15秒</option>
+                    <option value="30000">30秒</option>
                     <option value="60000">60秒 (1分)</option>
                     <option value="120000">120秒 (2分)</option>
                 </select>
@@ -183,7 +183,7 @@
             if (isAlert) {
                 // 運行情報（アラート）として表示する場合
                 if (isCriticalText) {
-                    icon = '🚨'; 
+                    icon = '❌️'; 
                     borderColorClass = 'border-red-600';
                     iconColorClass = 'text-red-700';
                     displayStatus = displayStatus.includes('運休') ? '運休' : '運転見合わせ';
@@ -194,7 +194,7 @@
                     displayStatus = displayStatus.includes('遅延') ? '遅延' : '乱れ';
                 } else {
                      // isAlert=trueだがテキストから状態が読み取れない場合（基本は発生しないが赤に設定）
-                    icon = '🔥';
+                    icon = 'ℹ️';
                     borderColorClass = 'border-red-500';
                     iconColorClass = 'text-red-600';
                     displayStatus = statusTextJa || '運行情報';
@@ -550,4 +550,5 @@
     </script>
 </body>
 </html>
+
 
